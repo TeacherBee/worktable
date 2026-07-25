@@ -1,0 +1,355 @@
+<article>
+  <header>
+    <h2>📅 日程管理</h2>
+  </header>
+
+  <!-- 日历导航 -->
+  <div class="grid" style="align-items: center; margin-bottom: 1rem;">
+    <button id="prevMonth" class="outline" style="width: auto;">‹ 上月</button>
+    <h3 id="monthTitle" style="text-align: center; margin: 0;"></h3>
+    <button id="nextMonth" class="outline" style="width: auto;">下月 ›</button>
+  </div>
+
+  <!-- 日历表格 -->
+  <table id="calendarGrid" class="striped" style="text-align: center;">
+    <thead>
+      <tr>
+        <th>日</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th>
+      </tr>
+    </thead>
+    <tbody id="calendarBody"></tbody>
+  </table>
+
+  <hr>
+
+  <!-- 添加日程 -->
+  <details id="addForm">
+    <summary>➕ 添加日程</summary>
+    <form id="scheduleForm" style="margin-top: 0.75rem;">
+      <div class="grid">
+        <label>
+          标题 *
+          <input type="text" id="schedTitle" required placeholder="日程标题">
+        </label>
+        <label>
+          日期
+          <input type="date" id="schedDate">
+        </label>
+        <label>
+          时间
+          <input type="time" id="schedTime" value="09:00">
+        </label>
+      </div>
+      <button type="submit" id="addBtn">添加日程</button>
+    </form>
+  </details>
+
+  <hr>
+
+  <!-- 当日日程列表 -->
+  <h4 id="selectedDateLabel">选择日期查看日程</h4>
+  <div id="scheduleList"></div>
+</article>
+
+<style>
+  #calendarGrid td {
+    padding: 0.6rem 0.3rem;
+    cursor: pointer;
+    transition: background 0.15s;
+    position: relative;
+  }
+  #calendarGrid td:hover {
+    background: var(--pico-primary-hover-background, #e9ecef);
+  }
+  #calendarGrid td.selected {
+    background: var(--pico-primary-background, #dbeafe);
+    font-weight: 600;
+    color: var(--pico-primary);
+  }
+  #calendarGrid td.other-month {
+    color: var(--pico-muted-color);
+    opacity: 0.5;
+  }
+  #calendarGrid td.today {
+    outline: 2px solid var(--pico-primary);
+    outline-offset: -2px;
+  }
+  /* 日程小圆点 */
+  .dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--pico-primary);
+    position: absolute;
+    bottom: 3px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .schedule-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+  }
+  .schedule-item:last-child {
+    border-bottom: none;
+  }
+  .schedule-item .time {
+    font-weight: 500;
+    min-width: 4em;
+  }
+  .schedule-item .title {
+    flex: 1;
+    margin: 0 1rem;
+  }
+  .schedule-item .del-btn {
+    padding: 0.15rem 0.5rem;
+    font-size: 0.85rem;
+  }
+  #scheduleList .empty {
+    color: var(--pico-muted-color);
+    text-align: center;
+    padding: 1rem;
+  }
+</style>
+
+<script>
+(function() {
+  // ── 状态 ──
+  var currentYear, currentMonth;
+  var selectedDate = null;  // 'YYYY-MM-DD'
+  var allSchedules = [];
+  var todayStr = new Date().toISOString().slice(0, 10);
+
+  // ── DOM 引用 ──
+  var titleEl = document.getElementById('monthTitle');
+  var bodyEl = document.getElementById('calendarBody');
+  var prevBtn = document.getElementById('prevMonth');
+  var nextBtn = document.getElementById('nextMonth');
+  var listEl = document.getElementById('scheduleList');
+  var selectedLabel = document.getElementById('selectedDateLabel');
+  var form = document.getElementById('scheduleForm');
+  var schedTitle = document.getElementById('schedTitle');
+  var schedDate = document.getElementById('schedDate');
+  var schedTime = document.getElementById('schedTime');
+
+  // ── 初始化 ──
+  var now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth();
+  schedDate.value = todayStr;
+
+  // ── 工具 ──
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function dateStr(y, m, d) { return y + '-' + pad(m + 1) + '-' + pad(d); }
+  function isToday(y, m, d) { return dateStr(y, m, d) === todayStr; }
+
+  // ── 加载日程 ──
+  function loadSchedules(callback) {
+    fetch('/api/calendar/schedules')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        allSchedules = data || [];
+        if (callback) callback();
+      })
+      .catch(function(err) {
+        console.error('Failed to load schedules:', err);
+        if (callback) callback();
+      });
+  }
+
+  // ── 获取某天的日程 ──
+  function getSchedulesForDate(dateStr) {
+    return allSchedules.filter(function(s) { return s.date === dateStr; });
+  }
+
+  // ── 获取有日程的日期集合 ──
+  function getDatesWithSchedules() {
+    var set = {};
+    allSchedules.forEach(function(s) { set[s.date] = true; });
+    return set;
+  }
+
+  // ── 渲染日历 ──
+  function renderCalendar() {
+    var firstDay = new Date(currentYear, currentMonth, 1).getDay(); // 0=Sun
+    var daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    var daysInPrev = new Date(currentYear, currentMonth, 0).getDate();
+    var datesWith = getDatesWithSchedules();
+
+    var months = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+    titleEl.textContent = currentYear + '年 ' + months[currentMonth];
+
+    var html = '';
+    var cells = [];
+
+    // 上月补齐
+    for (var i = firstDay - 1; i >= 0; i--) {
+      cells.push({ day: daysInPrev - i, other: true });
+    }
+    // 当月
+    for (var d = 1; d <= daysInMonth; d++) {
+      cells.push({ day: d, other: false });
+    }
+    // 下月补齐
+    while (cells.length % 7 !== 0) {
+      var fill = cells.length - (firstDay + daysInMonth) + 1;
+      cells.push({ day: fill, other: true });
+    }
+
+    for (var r = 0; r < cells.length; r += 7) {
+      html += '<tr>';
+      for (var c = 0; c < 7; c++) {
+        var cell = cells[r + c];
+        if (!cell) { html += '<td></td>'; continue; }
+
+        var ds = cell.other
+          ? dateStr(cell.day > 15 ? currentYear : (currentMonth === 0 ? currentYear - 1 : currentYear),
+                    cell.other && cell.day > 15 ? (currentMonth === 0 ? 11 : currentMonth - 1) : (currentMonth === 11 && cell.day <= 15 ? 0 : currentMonth + 1),
+                    cell.day)
+          : dateStr(currentYear, currentMonth, cell.day);
+
+        // For other month days, compute the actual date string properly
+        var realDs;
+        if (cell.other) {
+          if (cell.day > 15) {
+            // previous month
+            var pm = currentMonth === 0 ? 11 : currentMonth - 1;
+            var py = currentMonth === 0 ? currentYear - 1 : currentYear;
+            realDs = dateStr(py, pm, cell.day);
+          } else {
+            // next month
+            var nm = currentMonth === 11 ? 0 : currentMonth + 1;
+            var ny = currentMonth === 11 ? currentYear + 1 : currentYear;
+            realDs = dateStr(ny, nm, cell.day);
+          }
+        } else {
+          realDs = ds;
+        }
+
+        var classes = [];
+        if (cell.other) classes.push('other-month');
+        if (isToday(currentYear, currentMonth, cell.day) && !cell.other) classes.push('today');
+        if (selectedDate === realDs) classes.push('selected');
+        var hasDot = datesWith[realDs] && !cell.other;
+        var dotHtml = hasDot ? '<span class="dot"></span>' : '';
+
+        html += '<td class="' + classes.join(' ') + '" data-date="' + realDs + '">' + cell.day + dotHtml + '</td>';
+      }
+      html += '</tr>';
+    }
+    bodyEl.innerHTML = html;
+
+    // 点击事件
+    bodyEl.querySelectorAll('td[data-date]').forEach(function(td) {
+      td.addEventListener('click', function() {
+        selectDate(this.getAttribute('data-date'));
+      });
+    });
+  }
+
+  // ── 选择日期 ──
+  function selectDate(ds) {
+    selectedDate = ds;
+    // 更新选中样式
+    bodyEl.querySelectorAll('td[data-date]').forEach(function(td) {
+      td.classList.toggle('selected', td.getAttribute('data-date') === ds);
+    });
+    renderScheduleList(ds);
+  }
+
+  // ── 渲染日程列表 ──
+  function renderScheduleList(ds) {
+    if (!ds) {
+      selectedLabel.textContent = '选择日期查看日程';
+      listEl.innerHTML = '';
+      return;
+    }
+    var parts = ds.split('-');
+    selectedLabel.textContent = parts[0] + '年' + parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日 的日程';
+    var daySchedules = getSchedulesForDate(ds);
+    if (daySchedules.length === 0) {
+      listEl.innerHTML = '<div class="empty">暂无日程</div>';
+      return;
+    }
+    daySchedules.sort(function(a, b) { return (a.time || '00:00').localeCompare(b.time || '00:00'); });
+    var html = '';
+    daySchedules.forEach(function(s) {
+      html += '<div class="schedule-item">'
+        + '<span class="time">' + (s.time || '--:--') + '</span>'
+        + '<span class="title">' + s.title + '</span>'
+        + '<button class="del-btn outline" data-id="' + s.id + '">删除</button>'
+        + '</div>';
+    });
+    listEl.innerHTML = html;
+    // 删除事件
+    listEl.querySelectorAll('.del-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        deleteSchedule(this.getAttribute('data-id'));
+      });
+    });
+  }
+
+  // ── 删除日程 ──
+  function deleteSchedule(id) {
+    if (!confirm('确定删除该日程？')) return;
+    fetch('/api/calendar/schedules/' + id, { method: 'DELETE' })
+      .then(function(r) { return r.json(); })
+      .then(function() {
+        loadSchedules(function() {
+          renderCalendar();
+          if (selectedDate) renderScheduleList(selectedDate);
+        });
+      })
+      .catch(function(err) { alert('删除失败：' + err.message); });
+  }
+
+  // ── 添加日程 ──
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var title = schedTitle.value.trim();
+    var date = schedDate.value;
+    var time = schedTime.value || '09:00';
+    if (!title) { alert('请输入日程标题'); return; }
+    fetch('/api/calendar/schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title, date: date, time: time })
+    })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.error); });
+        return r.json();
+      })
+      .then(function() {
+        schedTitle.value = '';
+        loadSchedules(function() {
+          renderCalendar();
+          if (selectedDate) renderScheduleList(selectedDate);
+          // 自动展开日期
+          selectDate(date);
+        });
+      })
+      .catch(function(err) { alert('添加失败：' + err.message); });
+  });
+
+  // ── 切换月份 ──
+  prevBtn.addEventListener('click', function() {
+    currentMonth--;
+    if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+    renderCalendar();
+  });
+  nextBtn.addEventListener('click', function() {
+    currentMonth++;
+    if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+    renderCalendar();
+  });
+
+  // ── 首次加载 ──
+  loadSchedules(function() {
+    renderCalendar();
+    selectDate(todayStr);
+  });
+})();
+</script>

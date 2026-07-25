@@ -1,0 +1,224 @@
+<article>
+  <header>
+    <h2>📁 文档管理</h2>
+  </header>
+
+  <!-- 路径导航 -->
+  <nav id="breadcrumb" style="margin-bottom: 1rem; font-size: 0.9rem;"></nav>
+
+  <!-- 文件列表 -->
+  <div style="overflow-x: auto;">
+    <table id="fileTable" class="striped">
+      <thead>
+        <tr>
+          <th style="width: 2.5rem;"></th>
+          <th>名称</th>
+          <th style="width: 8rem;">大小</th>
+          <th style="width: 10rem;">修改日期</th>
+          <th style="width: 5rem;">操作</th>
+        </tr>
+      </thead>
+      <tbody id="fileBody"></tbody>
+    </table>
+  </div>
+
+  <div id="loading" style="text-align: center; padding: 2rem; color: var(--pico-muted-color);">加载中…</div>
+  <div id="errorMsg" style="text-align: center; padding: 2rem; color: var(--pico-del-color); display: none;"></div>
+</article>
+
+<style>
+  #fileTable td {
+    vertical-align: middle;
+    padding: 0.4rem 0.75rem;
+  }
+  #fileTable .file-icon {
+    font-size: 1.2rem;
+  }
+  #fileTable .dir-row {
+    cursor: pointer;
+  }
+  #fileTable .dir-row:hover {
+    background: var(--pico-primary-hover-background, #e9ecef);
+  }
+  #breadcrumb a {
+    cursor: pointer;
+    color: var(--pico-primary);
+    text-decoration: none;
+  }
+  #breadcrumb a:hover {
+    text-decoration: underline;
+  }
+  #breadcrumb span {
+    margin: 0 0.3rem;
+    color: var(--pico-muted-color);
+  }
+  .action-btn {
+    padding: 0.15rem 0.4rem;
+    font-size: 0.8rem;
+  }
+</style>
+
+<script>
+(function() {
+  var currentPath = '';
+  var currentAbsPath = '';
+
+  var tbody = document.getElementById('fileBody');
+  var loading = document.getElementById('loading');
+  var errorEl = document.getElementById('errorMsg');
+  var breadcrumb = document.getElementById('breadcrumb');
+
+  // ── 文件类型图标 ──
+  function getIcon(ext, isDir) {
+    if (isDir) return '📁';
+    var icons = {
+      '.js':   '🟨',
+      '.json': '📋',
+      '.html': '🌐',
+      '.css':  '🎨',
+      '.md':   '📝',
+      '.txt':  '📄',
+      '.doc':  '📘',
+      '.docx': '📘',
+      '.xls':  '📗',
+      '.xlsx': '📗',
+      '.pdf':  '📕',
+      '.png':  '🖼️',
+      '.jpg':  '🖼️',
+      '.jpeg': '🖼️',
+      '.gif':  '🖼️',
+      '.svg':  '🖼️',
+      '.ico':  '🖼️',
+      '.zip':  '📦',
+      '.rar':  '📦',
+      '.7z':   '📦',
+      '.exe':  '⚙️',
+      '.bat':  '⚙️',
+      '.sh':   '⚙️',
+    };
+    return icons[ext] || '📄';
+  }
+
+  // ── 加载文件列表 ──
+  function loadFiles(dir) {
+    loading.style.display = 'block';
+    errorEl.style.display = 'none';
+    tbody.innerHTML = '';
+
+    var url = '/api/file-browser/list';
+    if (dir) url += '?path=' + encodeURIComponent(dir);
+
+    fetch(url)
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.error); });
+        return r.json();
+      })
+      .then(function(data) {
+        loading.style.display = 'none';
+        currentPath = data.currentDir;
+        currentAbsPath = data.absolutePath;
+        renderBreadcrumb(data);
+        renderFiles(data.items);
+      })
+      .catch(function(err) {
+        loading.style.display = 'none';
+        errorEl.textContent = '⚠️ ' + err.message;
+        errorEl.style.display = 'block';
+      });
+  }
+
+  // ── 渲染面包屑 ──
+  function renderBreadcrumb(data) {
+    if (data.currentDir === '.') {
+      breadcrumb.innerHTML = '<strong>根目录</strong> <span style="color:var(--pico-muted-color);font-size:0.8rem;">(' + data.docRoot + ')</span>';
+      return;
+    }
+    var parts = data.currentDir.split('/');
+    var html = '<a data-path="">根目录</a>';
+    var accumulated = '';
+    parts.forEach(function(p) {
+      if (!p) return;
+      accumulated = accumulated ? accumulated + '/' + p : p;
+      html += ' <span>›</span> <a data-path="' + accumulated + '">' + p + '</a>';
+    });
+    html += ' <span style="color:var(--pico-muted-color);font-size:0.8rem;">(' + data.docRoot + ')</span>';
+    breadcrumb.innerHTML = html;
+    breadcrumb.querySelectorAll('a').forEach(function(a) {
+      a.addEventListener('click', function() {
+        loadFiles(this.getAttribute('data-path'));
+      });
+    });
+  }
+
+  // ── 渲染文件列表 ──
+  function renderFiles(items) {
+    if (items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--pico-muted-color);">空目录</td></tr>';
+      return;
+    }
+    var html = '';
+    // 返回上级
+    if (currentPath !== '.') {
+      html += '<tr class="dir-row" data-action="up">'
+        + '<td class="file-icon">📂</td>'
+        + '<td colspan="4"><em>⋯ 返回上级</em></td>'
+        + '</tr>';
+    }
+    items.forEach(function(item) {
+      var icon = getIcon(item.ext, item.isDir);
+      var nameHtml = item.isDir
+        ? '<strong>' + item.name + '</strong>'
+        : item.name;
+      var actions = item.isDir
+        ? ''
+        : '<button class="action-btn outline" data-action="open" data-path="' + currentPath + '/' + item.name + '">打开</button> '
+        + '<button class="action-btn outline" data-action="reveal" data-path="' + currentPath + '/' + item.name + '">📂</button>';
+      html += '<tr class="' + (item.isDir ? 'dir-row' : '') + '" data-name="' + item.name + '">'
+        + '<td class="file-icon">' + icon + '</td>'
+        + '<td>' + nameHtml + '</td>'
+        + '<td>' + item.sizeFormatted + '</td>'
+        + '<td>' + item.modifiedAt + '</td>'
+        + '<td>' + actions + '</td>'
+        + '</tr>';
+    });
+    tbody.innerHTML = html;
+
+    // 点击目录进入
+    tbody.querySelectorAll('.dir-row[data-name]').forEach(function(row) {
+      row.addEventListener('click', function() {
+        var name = this.getAttribute('data-name');
+        var newPath = currentPath === '.' ? name : currentPath + '/' + name;
+        loadFiles(newPath);
+      });
+    });
+    // 返回上级
+    tbody.querySelectorAll('[data-action="up"]').forEach(function(row) {
+      row.addEventListener('click', function() {
+        var parent = currentPath.substring(0, currentPath.lastIndexOf('/'));
+        loadFiles(parent || '');
+      });
+    });
+    // 打开文件
+    tbody.querySelectorAll('[data-action="open"]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        window.open('/api/file-browser/open?path=' + encodeURIComponent(this.getAttribute('data-path')), '_blank');
+      });
+    });
+    // 显示在文件夹中
+    tbody.querySelectorAll('[data-action="reveal"]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        fetch('/api/file-browser/reveal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: this.getAttribute('data-path') })
+        }).catch(function(err) { console.error(err); });
+      });
+    });
+  }
+
+  // ── 首次加载 ──
+  loadFiles('');
+})();
+</script>

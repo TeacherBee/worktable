@@ -1,0 +1,13 @@
+{
+  "name": "worktable",
+  "version": "0.1.0",
+  "description": "本地工具台 — 日程管理 + 文档管理 + 更多",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "node-notifier": "^10.0.1"
+  }
+}
