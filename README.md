@@ -10,12 +10,15 @@
 # 确保已安装依赖
 npm install
 
-# 启动服务
+# 启动服务（开发，看控制台日志）
 node server.js
-# 或双击 start.bat（会自动打开浏览器）
 ```
 
+**日常使用**：双击 `start.bat`（无黑框，自动打开浏览器）
+
 浏览器访问 **http://localhost:8180**
+
+关闭服务：浏览器左侧导航栏底部 → **⏻ 停止服务**
 
 ---
 
@@ -35,39 +38,44 @@ node server.js
 - **打开文件** — 点击文件用系统默认程序打开
 - **定位文件** — 在资源管理器中定位文件/文件夹
 
+### 📂 代码管理
+
+- **仓库选择** — 内置 `TeacherBee/worktable`，支持添加/删除 GitHub 仓库
+- **文件树浏览** — 以树形结构展示仓库目录，点击展开/收起，点击文件查看内容
+- **同级文件导航** — 查看文件时显示同级文件列表，快速切换
+- **Commit 列表** — 表格展示 SHA、作者、日期、提交信息，支持分页加载
+- **Diff 对比** — 勾选两个 commit，一键查看它们之间的差异（增删行高亮）
+- **数据源** — 通过 GitHub REST API 实时拉取，无需本地 clone，不占磁盘
+
 ---
 
 ## 架构概览
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  Browser                         │
-│  ┌─────────────┐          ┌──────────────────┐  │
-│  │  📅 日程     │          │  📁 文档          │  │
-│  │  page.html   │          │  page.html        │  │
-│  └──────┬──────┘          └────────┬─────────┘  │
-│         │                          │             │
-│         ▼                          ▼             │
-│    HTTP API                   HTTP API           │
-│  /api/calendar/*           /api/file-browser/*   │
-└──────────────┬──────────────────────┬────────────┘
-               │                      │
-               ▼                      ▼
-        ┌──────────────┐    ┌──────────────────┐
-        │ calendar/     │    │ file-browser/    │
-        │ api.js        │    │ api.js           │
-        │ engine.js     │    └──────────────────┘
-        └──────┬───────┘
-               │ 系统通知
-               ▼
-        ┌──────────────┐
-        │  core/        │
-        │  notify.js    │──  node-notifier → Windows 弹窗
-        │  storage.js   │──  data/schedules.json
-        │  router.js    │── 模块自动发现
-        │  server.js    │── Express 服务
-        │  web-ui.js    │── 主页面框架 (Pico CSS)
-        └──────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                        Browser                            │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────────────┐   │
+│  │ 📅 日程  │  │ 📁 文档  │  │ 📂 代码管理            │   │
+│  │ page.html│  │ page.html│  │ page.html              │   │
+│  └────┬─────┘  └────┬─────┘  └──────────┬────────────┘   │
+│       │             │                   │                 │
+│       ▼             ▼                   ▼                 │
+│  /api/calendar  /api/file-browser  /api/repo-browser      │
+│                                              │            │
+│                                              ▼            │
+│                                      GitHub REST API      │
+└──────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │    core/     │
+                    │              │
+                    │  notify.js   │── node-notifier → Windows 弹窗
+                    │  storage.js  │── data/schedules.json
+                    │  router.js   │── 模块自动发现
+                    │  server.js   │── Express 服务 + /api/shutdown
+                    │  web-ui.js   │── 主页面框架 (Pico CSS)
+                    └──────────────┘
 ```
 
 ---
@@ -77,18 +85,18 @@ node server.js
 ```
 worktable/
 │
-├── server.js                 入口 — 启动 HTTP 服务
+├── server.js                 入口 — 启动 HTTP 服务 + 关闭接口
 ├── package.json              依赖声明
-├── config.json               配置（端口、文档目录等）
-├── start.bat                 一键启动脚本
+├── config.json               配置（端口、文档目录、GitHub Token）
+├── start.bat                 一键启动（无黑框自动隐藏）
 ├── README.md                 本文件
 │
 ├── core/                     核心基础设施
-│   ├── server.js             Express 实例 + 中间件
+│   ├── server.js             Express 实例 + 中间件 + /api/shutdown
 │   ├── router.js             模块自动扫描与路由注册
 │   ├── storage.js            JSON 文件读写
 │   ├── notify.js             系统通知封装
-│   └── web-ui.js             主页面 HTML 渲染
+│   └── web-ui.js             主页面 HTML 渲染（含导航栏 + 停止按钮）
 │
 ├── modules/                  功能模块（每个独立子目录）
 │   ├── calendar/             日程管理
@@ -96,9 +104,13 @@ worktable/
 │   │   ├── engine.js         提醒引擎 (轮询 + 通知)
 │   │   └── page.html         前端页面
 │   │
-│   └── file-browser/         文档管理
-│       ├── api.js            后端 API (文件列表/打开/定位)
-│       └── page.html         前端页面
+│   ├── file-browser/         文档管理
+│   │   ├── api.js            后端 API (文件列表/打开/定位)
+│   │   └── page.html         前端页面
+│   │
+│   └── repo-browser/         代码管理
+│       ├── api.js            GitHub API 封装 (tree/content/commits/compare)
+│       └── page.html         前端页面 (双栏布局)
 │
 ├── data/                     运行时数据
 │   └── schedules.json        日程持久化
@@ -145,7 +157,8 @@ module.exports = { register, label };
 ```json
 {
   "port": 8180,
-  "docRoot": "."
+  "docRoot": ".",
+  "githubToken": ""
 }
 ```
 
@@ -153,6 +166,9 @@ module.exports = { register, label };
 |--------|------|--------|
 | `port` | HTTP 服务端口 | `8180` |
 | `docRoot` | 文档管理读取的根目录 | `.`（项目目录） |
+| `githubToken` | GitHub 个人访问令牌（提 API 限流到 5000次/小时） | `""`（匿名限流 60次/小时） |
+
+> ⚠️ `config.json` 已在 `.gitignore` 中，不会提交到 Git，防止 Token 泄露。
 
 ---
 
@@ -163,6 +179,7 @@ module.exports = { register, label };
 | 运行时 | Node.js v26.3.0 |
 | Web 框架 | Express |
 | 系统通知 | node-notifier |
+| GitHub API | Node.js 内置 https 模块（零额外依赖） |
 | 前端样式 | Pico CSS（CDN 零构建） |
 | 前端逻辑 | 原生 JavaScript |
 | 数据存储 | JSON 文件 |
@@ -183,9 +200,12 @@ module.exports = { register, label };
 # 安装依赖
 npm install
 
-# 启动（开发）
+# 启动（开发，看控制台日志）
 node server.js
 
-# 启动（一键）
+# 启动（日常，无黑框自动隐藏）
 双击 start.bat
+
+# 停止
+浏览器左侧导航栏 → ⏻ 停止服务
 ```

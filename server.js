@@ -23,6 +23,9 @@ const { createServer } = require('./core/server');
 const port = config.port || 8180;
 const app = createServer(config);
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`\n  ◐ Worktable running at http://localhost:${port}\n`);
 });
+
+// 把 server 实例存到 app 上，/api/shutdown 路由能调用 server.close()
+app.set('serverInstance', server);

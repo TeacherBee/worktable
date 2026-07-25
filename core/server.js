@@ -40,6 +40,17 @@ function createServer(config) {
     }
   });
 
+  // ── 停止服务 ──
+  app.post('/api/shutdown', (req, res) => {
+    res.json({ success: true, message: '服务正在关闭…' });
+    console.log('[server] Shutting down by user request...');
+    setTimeout(() => {
+      const srv = req.app.get('serverInstance');
+      if (srv) srv.close();
+      process.exit(0);
+    }, 500);
+  });
+
   // ── 全局错误处理 ──
   app.use((err, req, res, next) => {
     console.error('[server] Unhandled error:', err.stack || err.message || err);

@@ -69,6 +69,20 @@ function renderMainPage(navItems) {
       font-size: 0.8rem;
       color: var(--pico-muted-color);
     }
+    .sidebar .shutdown-link {
+      display: block;
+      padding: 0.4rem 1.25rem;
+      font-size: 0.82rem;
+      color: var(--pico-del-color, #d73a49);
+      text-decoration: none;
+      cursor: pointer;
+      border-top: 1px solid var(--pico-muted-border-color, #eee);
+      transition: background 0.15s;
+    }
+    .sidebar .shutdown-link:hover {
+      background: var(--pico-del-color, #d73a49);
+      color: #fff;
+    }
     /* ── 右侧主内容 ── */
     .main-content {
       flex: 1;
@@ -99,6 +113,7 @@ function renderMainPage(navItems) {
 ${navLinks}
     <div class="spacer"></div>
     <div class="footer" id="dateDisplay"></div>
+    <a id="shutdownBtn" class="shutdown-link">⏻ 停止服务</a>
   </nav>
 
   <!-- 右侧内容区 -->
@@ -117,6 +132,26 @@ ${navLinks}
       document.getElementById('dateDisplay').textContent = now.toLocaleDateString('zh-CN', opts);
     }
     updateDate();
+
+    // ── 停止服务 ──
+    document.getElementById('shutdownBtn').addEventListener('click', function(e) {
+      e.preventDefault();
+      if (!confirm('确定要停止 Worktable 服务吗？')) return;
+      fetch('/api/shutdown', { method: 'POST' })
+        .then(function() {
+          document.body.innerHTML = '<article style="max-width:400px;margin:4rem auto;text-align:center;">'
+            + '<h2>⏻ 服务已关闭</h2>'
+            + '<p>你可以关闭此标签页了。</p>'
+            + '</article>';
+        })
+        .catch(function() {
+          // 服务关闭后 fetch 会断开，也算成功
+          document.body.innerHTML = '<article style="max-width:400px;margin:4rem auto;text-align:center;">'
+            + '<h2>⏻ 服务已关闭</h2>'
+            + '<p>你可以关闭此标签页了。</p>'
+            + '</article>';
+        });
+    });
 
     // ── 导航点击：加载模块页面 ──
     document.querySelectorAll('.nav-link').forEach(function(link) {
