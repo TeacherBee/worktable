@@ -1,0 +1,580 @@
+<article style="padding: 0.5rem 1rem;">
+  <!-- ═══ 顶部：仓库选择栏 ═══ -->
+  <div class="grid" style="grid-template-columns: 1fr auto auto; align-items: end; gap: 0.5rem; margin-bottom: 0.5rem;">
+    <label style="margin-bottom: 0;">
+      仓库
+      <select id="repoSelect" style="margin-bottom: 0;"></select>
+    </label>
+    <button id="addRepoBtn" class="outline" style="width: auto; margin-bottom: 0;">+ 添加</button>
+    <button id="refreshBtn" class="outline" style="width: auto; margin-bottom: 0;" title="刷新">🔄</button>
+  </div>
+
+  <div class="grid" style="grid-template-columns: 280px 1fr; gap: 0.75rem;">
+    <!-- ═══ 左栏：文件树 ═══ -->
+    <div style="border: 1px solid var(--pico-muted-border-color, #dee2e6); border-radius: 6px; overflow-y: auto; max-height: 70vh; padding: 0.25rem 0;">
+      <div style="padding: 0.4rem 0.75rem; font-weight: 600; font-size: 0.85rem; border-bottom: 1px solid var(--pico-muted-border-color, #eee);">
+        📂 项目文件
+        <span id="branchBadge" style="float: right; font-weight: normal; font-size: 0.75rem; color: var(--pico-muted-color);"></span>
+      </div>
+      <div id="treeContainer" style="padding: 0.25rem 0;">
+        <div style="text-align: center; padding: 1rem; color: var(--pico-muted-color); font-size: 0.85rem;">加载中…</div>
+      </div>
+    </div>
+
+    <!-- ═══ 右栏 ═══ -->
+    <div style="display: flex; flex-direction: column; gap: 0.5rem; overflow: hidden;">
+      <!-- ── Commits 表格 ── -->
+      <div style="border: 1px solid var(--pico-muted-border-color, #dee2e6); border-radius: 6px; overflow: hidden;">
+        <div style="padding: 0.4rem 0.75rem; font-weight: 600; font-size: 0.85rem; border-bottom: 1px solid var(--pico-muted-border-color, #eee); display: flex; justify-content: space-between; align-items: center;">
+          <span>📋 Commits</span>
+          <span>
+            <button id="diffBtn" class="outline" style="padding: 0.1rem 0.6rem; font-size: 0.8rem;" disabled>查看 Diff</button>
+            <button id="loadMoreBtn" class="outline" style="padding: 0.1rem 0.6rem; font-size: 0.8rem;">加载更多</button>
+          </span>
+        </div>
+        <div style="overflow-x: auto; max-height: 240px; overflow-y: auto;">
+          <table id="commitTable" class="striped" style="margin-bottom: 0; font-size: 0.8rem;">
+            <thead>
+              <tr>
+                <th style="width: 2rem; padding: 0.3rem 0.4rem;"></th>
+                <th style="width: 5.5rem; padding: 0.3rem 0.4rem;">SHA</th>
+                <th style="width: 5rem; padding: 0.3rem 0.4rem;">作者</th>
+                <th style="width: 7rem; padding: 0.3rem 0.4rem;">日期</th>
+                <th style="padding: 0.3rem 0.4rem;">提交信息</th>
+              </tr>
+            </thead>
+            <tbody id="commitBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── 详情区域（文件内容 / Diff） ── -->
+      <div id="detailPanel" style="border: 1px solid var(--pico-muted-border-color, #dee2e6); border-radius: 6px; overflow: hidden; flex: 1; min-height: 200px;">
+        <div id="detailHeader" style="padding: 0.4rem 0.75rem; font-weight: 600; font-size: 0.85rem; border-bottom: 1px solid var(--pico-muted-border-color, #eee);">
+          详情
+        </div>
+        <div id="detailBody" style="padding: 0.75rem; overflow-y: auto; max-height: 350px; font-size: 0.85rem;">
+          <div style="text-align: center; color: var(--pico-muted-color); padding: 2rem;">
+            选择文件查看内容，或勾选两个 commit 查看 Diff
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</article>
+
+<style>
+  /* 文件树样式 */
+  .tree-node {
+    display: flex;
+    align-items: center;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .tree-node:hover {
+    background: var(--pico-primary-hover-background, #f0f0f0);
+  }
+  .tree-node .icon { margin-right: 0.3rem; flex-shrink: 0; }
+  .tree-node .name { overflow: hidden; text-overflow: ellipsis; }
+  .tree-node .toggle { width: 1rem; flex-shrink: 0; text-align: center; color: var(--pico-muted-color); }
+  .tree-children { padding-left: 1.1rem; }
+  .tree-children.collapsed { display: none; }
+
+  /* Commit 表格 */
+  #commitTable td { padding: 0.3rem 0.4rem; vertical-align: middle; }
+  #commitTable tr { cursor: default; }
+  .sha-cell { font-family: monospace; font-size: 0.78rem; color: var(--pico-code-color, #1b6ac9); }
+  .msg-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .commit-check { width: 1rem; height: 1rem; cursor: pointer; }
+
+  /* Diff 样式 */
+  .diff-file { margin-bottom: 0.75rem; }
+  .diff-file-header {
+    padding: 0.3rem 0.5rem;
+    font-family: monospace;
+    font-size: 0.8rem;
+    background: var(--pico-card-background-color, #f6f8fa);
+    border-radius: 4px 4px 0 0;
+    display: flex; justify-content: space-between;
+  }
+  .diff-file-header .status { font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 3px; }
+  .status-added { background: #d4edda; color: #155724; }
+  .status-modified { background: #fff3cd; color: #856404; }
+  .status-removed { background: #f8d7da; color: #721c24; }
+  .diff-patch {
+    padding: 0.5rem;
+    font-family: monospace;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    background: var(--pico-card-background-color, #fafafa);
+    border: 1px solid var(--pico-muted-border-color, #e1e4e8);
+    border-radius: 0 0 4px 4px;
+    overflow-x: auto;
+    white-space: pre;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .diff-patch .add { background: #e6ffed; }
+  .diff-patch .del { background: #ffeef0; }
+
+  /* 文件内容 */
+  .file-viewer { }
+  .file-viewer .file-path {
+    font-family: monospace; font-size: 0.82rem;
+    padding: 0.3rem 0; margin-bottom: 0.3rem;
+    color: var(--pico-primary);
+    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+  }
+  .file-viewer .siblings {
+    display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem;
+  }
+  .file-viewer .siblings .tag {
+    padding: 0.1rem 0.4rem; font-size: 0.78rem;
+    border-radius: 3px; cursor: pointer;
+    background: var(--pico-card-background-color, #f0f0f0);
+    white-space: nowrap;
+  }
+  .file-viewer .siblings .tag:hover { background: var(--pico-primary-hover-background, #dbeafe); }
+  .file-viewer .siblings .tag.active { background: var(--pico-primary); color: white; }
+  .file-viewer pre {
+    padding: 0.5rem; font-size: 0.8rem; line-height: 1.4;
+    background: var(--pico-card-background-color, #f8f9fa);
+    border: 1px solid var(--pico-muted-border-color, #e1e4e8);
+    border-radius: 4px; overflow-x: auto; overflow-y: auto;
+    max-height: 350px;
+  }
+</style>
+
+<script>
+(function() {
+  // ── 状态 ──
+  var currentOwner = 'TeacherBee';
+  var currentRepo = 'worktable';
+  var currentBranch = 'main';
+  var allTree = [];            // 扁平文件树
+  var checkedCommits = [];     // 勾选的 SHA
+  var commitPage = 1;
+  var loadingCommits = false;
+  var allCommits = [];         // 已加载的所有 commits
+  var repoList = [];
+  var siblingsCache = {};      // 同级文件缓存
+
+  // ── DOM ──
+  var repoSelect = document.getElementById('repoSelect');
+  var addRepoBtn = document.getElementById('addRepoBtn');
+  var refreshBtn = document.getElementById('refreshBtn');
+  var treeContainer = document.getElementById('treeContainer');
+  var branchBadge = document.getElementById('branchBadge');
+  var commitBody = document.getElementById('commitBody');
+  var diffBtn = document.getElementById('diffBtn');
+  var loadMoreBtn = document.getElementById('loadMoreBtn');
+  var detailBody = document.getElementById('detailBody');
+  var detailHeader = document.getElementById('detailHeader');
+
+  // ── 工具 ──
+  function escapeHtml(text) {
+    var d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  function formatDate(isoStr) {
+    if (!isoStr) return '-';
+    var d = new Date(isoStr);
+    return (d.getMonth()+1)+'/'+d.getDate()+' '+d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+  }
+
+  function repoKey() { return currentOwner+'/'+currentRepo; }
+
+  // ════════════════════════════════════════════
+  //  仓库管理
+  // ════════════════════════════════════════════
+
+  function loadRepos() {
+    fetch('/api/repo-browser/repos')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        repoList = data;
+        repoSelect.innerHTML = '';
+        data.forEach(function(r) {
+          var opt = document.createElement('option');
+          opt.value = r.owner + '|' + r.repo;
+          opt.textContent = r.label;
+          if (r.owner === currentOwner && r.repo === currentRepo) opt.selected = true;
+          repoSelect.appendChild(opt);
+        });
+      });
+  }
+
+  repoSelect.addEventListener('change', function() {
+    var parts = this.value.split('|');
+    if (parts.length === 2) {
+      currentOwner = parts[0];
+      currentRepo = parts[1];
+      currentBranch = 'main';
+      commitPage = 1;
+      allCommits = [];
+      checkedCommits = [];
+      switchRepo();
+    }
+  });
+
+  addRepoBtn.addEventListener('click', function() {
+    var url = prompt('输入 GitHub 仓库 URL:\n例如: https://github.com/owner/repo');
+    if (!url) return;
+    fetch('/api/repo-browser/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url })
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        loadRepos();
+        currentOwner = data.owner;
+        currentRepo = data.repo;
+        repoSelect.value = data.owner + '|' + data.repo;
+        commitPage = 1; allCommits = []; checkedCommits = [];
+        switchRepo();
+      })
+      .catch(function(err) { alert('添加失败: ' + err.message); });
+  });
+
+  refreshBtn.addEventListener('click', function() {
+    // 清除缓存
+    commitPage = 1; allCommits = []; checkedCommits = [];
+    switchRepo();
+  });
+
+  // ════════════════════════════════════════════
+  //  切换仓库
+  // ════════════════════════════════════════════
+
+  function switchRepo() {
+    treeContainer.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-muted-color);font-size:0.85rem;">加载中…</div>';
+    commitBody.innerHTML = '';
+    detailBody.innerHTML = '<div style="text-align:center;color:var(--pico-muted-color);padding:2rem;">加载中…</div>';
+    detailHeader.textContent = '详情';
+    diffBtn.disabled = true;
+    allTree = [];
+    siblingsCache = {};
+
+    // 获取仓库信息
+    fetch('/api/repo-browser/repo?owner=' + currentOwner + '&repo=' + currentRepo)
+      .then(function(r) { return r.json(); })
+      .then(function(info) {
+        if (info.defaultBranch) currentBranch = info.defaultBranch;
+        branchBadge.textContent = currentBranch;
+        loadTree();
+        loadCommits();
+      })
+      .catch(function(err) {
+        treeContainer.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-del-color);">加载失败: ' + err.message + '</div>';
+        detailBody.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--pico-del-color);">' + err.message + '</div>';
+      });
+  }
+
+  // ════════════════════════════════════════════
+  //  文件树
+  // ════════════════════════════════════════════
+
+  function loadTree() {
+    var url = '/api/repo-browser/tree?owner=' + currentOwner + '&repo=' + currentRepo + '&branch=' + currentBranch;
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) throw new Error(data.error);
+        allTree = data.tree || [];
+        renderTree();
+      })
+      .catch(function(err) {
+        treeContainer.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-del-color);">' + err.message + '</div>';
+      });
+  }
+
+  function renderTree() {
+    if (!allTree.length) {
+      treeContainer.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-muted-color);">空仓库</div>';
+      return;
+    }
+
+    // 构建嵌套结构
+    var root = { children: {} };
+    allTree.forEach(function(item) {
+      var parts = item.path.split('/');
+      var current = root;
+      for (var i = 0; i < parts.length; i++) {
+        var isFile = (i === parts.length - 1) && (item.type === 'blob');
+        var name = parts[i];
+        if (!current.children[name]) {
+          current.children[name] = {
+            name: name,
+            path: parts.slice(0, i+1).join('/'),
+            isFile: isFile,
+            children: isFile ? null : {},
+          };
+        }
+        current = current.children[name];
+      }
+    });
+
+    var html = buildTreeHTML(root.children, '');
+    treeContainer.innerHTML = html;
+
+    // 绑定点击事件
+    treeContainer.querySelectorAll('.tree-node').forEach(function(node) {
+      node.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var path = this.getAttribute('data-path');
+        var isFile = this.getAttribute('data-file') === 'true';
+        var children = this.nextElementSibling;
+
+        if (isFile) {
+          openFile(path);
+        } else {
+          if (children) {
+            children.classList.toggle('collapsed');
+            this.querySelector('.toggle').textContent = children.classList.contains('collapsed') ? '▶' : '▼';
+          }
+        }
+      });
+    });
+  }
+
+  function buildTreeHTML(children, basePath) {
+    // 排序：目录 > 文件，按名称
+    var names = Object.keys(children).sort(function(a, b) {
+      var aIsDir = !children[a].isFile;
+      var bIsDir = !children[b].isFile;
+      if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+      return a.localeCompare(b);
+    });
+
+    var html = '';
+    names.forEach(function(name) {
+      var node = children[name];
+      if (node.isFile) {
+        html += '<div class="tree-node" data-path="' + node.path + '" data-file="true">'
+          + '<span class="icon">📄</span>'
+          + '<span class="name">' + escapeHtml(node.name) + '</span>'
+          + '</div>';
+      } else {
+        var hasChildren = node.children && Object.keys(node.children).length > 0;
+        html += '<div class="tree-node" data-path="' + node.path + '" data-file="false">'
+          + '<span class="toggle">' + (hasChildren ? '▼' : '') + '</span>'
+          + '<span class="icon">📁</span>'
+          + '<span class="name">' + escapeHtml(node.name) + '</span>'
+          + '</div>';
+        if (hasChildren) {
+          html += '<div class="tree-children">';
+          html += buildTreeHTML(node.children, node.path);
+          html += '</div>';
+        }
+      }
+    });
+    return html;
+  }
+
+  // ════════════════════════════════════════════
+  //  文件内容
+  // ════════════════════════════════════════════
+
+  function openFile(filePath) {
+    detailHeader.textContent = '📄 ' + filePath;
+    detailBody.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-muted-color);">加载中…</div>';
+
+    fetch('/api/repo-browser/content?owner=' + currentOwner + '&repo=' + currentRepo + '&path=' + encodeURIComponent(filePath) + '&branch=' + currentBranch)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) throw new Error(data.error);
+
+        var html = '<div class="file-viewer">';
+
+        // 同级文件导航
+        if (data.siblings && data.siblings.length > 0) {
+          html += '<div class="siblings">';
+          data.siblings.forEach(function(sib) {
+            if (sib.type === 'dir') {
+              html += '<span class="tag">📁 ' + escapeHtml(sib.name) + '</span>';
+            } else {
+              var active = sib.name === data.name ? ' active' : '';
+              html += '<span class="tag' + active + '" data-path="' + escapeHtml(sib.path) + '">' + escapeHtml(sib.name) + '</span>';
+            }
+          });
+          html += '</div>';
+        }
+
+        html += '<pre>' + escapeHtml(data.content) + '</pre>';
+        html += '</div>';
+        detailBody.innerHTML = html;
+
+        // 同级文件点击切换
+        detailBody.querySelectorAll('.siblings .tag[data-path]').forEach(function(tag) {
+          tag.addEventListener('click', function() {
+            openFile(this.getAttribute('data-path'));
+          });
+        });
+      })
+      .catch(function(err) {
+        detailBody.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-del-color);">' + err.message + '</div>';
+      });
+  }
+
+  // ════════════════════════════════════════════
+  //  Commits
+  // ════════════════════════════════════════════
+
+  function loadCommits() {
+    if (loadingCommits) return;
+    loadingCommits = true;
+
+    var url = '/api/repo-browser/commits?owner=' + currentOwner + '&repo=' + currentRepo + '&page=' + commitPage + '&branch=' + currentBranch;
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) throw new Error(data.error);
+        allCommits = allCommits.concat(data.commits);
+        renderCommits();
+        commitPage++;
+        loadingCommits = false;
+      })
+      .catch(function(err) {
+        detailBody.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-del-color);">' + err.message + '</div>';
+        loadingCommits = false;
+      });
+  }
+
+  function renderCommits() {
+    if (!allCommits.length) {
+      commitBody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--pico-muted-color);">暂无提交</td></tr>';
+      return;
+    }
+
+    var html = '';
+    allCommits.forEach(function(c) {
+      var checked = checkedCommits.indexOf(c.sha) !== -1 ? 'checked' : '';
+      html += '<tr data-sha="' + c.sha + '">'
+        + '<td><input type="checkbox" class="commit-check" value="' + c.sha + '" ' + checked + '></td>'
+        + '<td class="sha-cell">' + escapeHtml(c.shortSha) + '</td>'
+        + '<td>' + escapeHtml(c.author) + '</td>'
+        + '<td>' + formatDate(c.date) + '</td>'
+        + '<td class="msg-cell" title="' + escapeHtml(c.message).replace(/"/g,'&quot;') + '">' + escapeHtml(c.message) + '</td>'
+        + '</tr>';
+    });
+    commitBody.innerHTML = html;
+
+    // 勾选事件
+    commitBody.querySelectorAll('.commit-check').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        var sha = this.value;
+        if (this.checked) {
+          if (checkedCommits.length >= 2) {
+            this.checked = false;
+            alert('最多勾选 2 个 commit');
+            return;
+          }
+          checkedCommits.push(sha);
+        } else {
+          var idx = checkedCommits.indexOf(sha);
+          if (idx !== -1) checkedCommits.splice(idx, 1);
+        }
+        diffBtn.disabled = checkedCommits.length !== 2;
+      });
+    });
+  }
+
+  loadMoreBtn.addEventListener('click', function() {
+    loadCommits();
+  });
+
+  // ════════════════════════════════════════════
+  //  Diff
+  // ════════════════════════════════════════════
+
+  diffBtn.addEventListener('click', function() {
+    if (checkedCommits.length !== 2) return;
+
+    // 按时间排序：旧的 base，新的 head
+    var base = checkedCommits[1];
+    var head = checkedCommits[0];
+
+    // 找 commit 的日期来排序（最早的是 base）
+    var c0 = allCommits.find(function(c) { return c.sha === checkedCommits[0]; });
+    var c1 = allCommits.find(function(c) { return c.sha === checkedCommits[1]; });
+    if (c0 && c1 && c0.date < c1.date) {
+      base = checkedCommits[0];
+      head = checkedCommits[1];
+    }
+
+    detailHeader.textContent = '📊 Diff: ' + base.slice(0,7) + '...' + head.slice(0,7);
+    detailBody.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-muted-color);">加载 diff…</div>';
+
+    var url = '/api/repo-browser/compare?owner=' + currentOwner + '&repo=' + currentRepo + '&base=' + base + '&head=' + head;
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) throw new Error(data.error);
+
+        if (!data.files || data.files.length === 0) {
+          detailBody.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--pico-muted-color);">无差异</div>';
+          return;
+        }
+
+        var html = '<div style="margin-bottom:0.5rem;font-size:0.82rem;color:var(--pico-muted-color);">'
+          + '共 ' + data.files.length + ' 个文件变更';
+
+        // 统计
+        var adds = 0, dels = 0;
+        data.files.forEach(function(f) { adds += f.additions || 0; dels += f.deletions || 0; });
+        html += ' &nbsp; <span style="color:#28a745;">+' + adds + '</span> <span style="color:#d73a49;">-' + dels + '</span>';
+        html += '</div>';
+
+        data.files.forEach(function(f) {
+          var statusClass = 'status-' + f.status;
+          html += '<div class="diff-file">'
+            + '<div class="diff-file-header">'
+            + '<span>' + escapeHtml(f.filename) + '</span>'
+            + '<span class="status ' + statusClass + '">' + f.status + ' +' + f.additions + ' -' + f.deletions + '</span>'
+            + '</div>';
+
+          if (f.patch) {
+            html += '<div class="diff-patch">';
+            var lines = f.patch.split('\n');
+            lines.forEach(function(line) {
+              if (line.startsWith('+')) html += '<span class="add">' + escapeHtml(line) + '</span>\n';
+              else if (line.startsWith('-')) html += '<span class="del">' + escapeHtml(line) + '</span>\n';
+              else html += escapeHtml(line) + '\n';
+            });
+            html += '</div>';
+          } else {
+            html += '<div class="diff-patch" style="color:var(--pico-muted-color);">二进制文件或差异过大</div>';
+          }
+
+          html += '</div>';
+        });
+
+        detailBody.innerHTML = html;
+      })
+      .catch(function(err) {
+        detailBody.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--pico-del-color);">' + err.message + '</div>';
+      });
+  });
+
+  // ════════════════════════════════════════════
+  //  初始化
+  // ════════════════════════════════════════════
+
+  loadRepos();
+  setTimeout(function() {
+    if (repoSelect.value) {
+      var parts = repoSelect.value.split('|');
+      currentOwner = parts[0];
+      currentRepo = parts[1];
+      switchRepo();
+    }
+  }, 100);
+})();
+</script>
