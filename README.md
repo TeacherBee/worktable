@@ -47,31 +47,43 @@ node server.js
 - **Diff 对比** — 勾选两个 commit，一键查看它们之间的差异（增删行高亮）
 - **数据源** — 通过 GitHub REST API 实时拉取，无需本地 clone，不占磁盘
 
+### 📋 概括性文档
+
+- **版本化管理** — 为每份文档记录版本号、关联 commit SHA、创建/修改时间
+- **上传文档** — 从本地上传 .md 格式的概括性文档
+- **增量文档生成** — 基于代码变更自动更新文档：
+  - ① 选择基准文档 + 目标 commit → 分析 CodeDiff
+  - ② DeepSeek 提取变更要点（新增/修改/删除文件）
+  - ③ 变更点供用户审查 → 确认后生成新文档
+- **预览与保存** — 生成结果可预览，确认后保存为新版本
+
 ---
 
 ## 架构概览
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                        Browser                            │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────────┐   │
-│  │ 📅 日程  │  │ 📁 文档  │  │ 📂 代码管理            │   │
-│  │ page.html│  │ page.html│  │ page.html              │   │
-│  └────┬─────┘  └────┬─────┘  └──────────┬────────────┘   │
-│       │             │                   │                 │
-│       ▼             ▼                   ▼                 │
-│  /api/calendar  /api/file-browser  /api/repo-browser      │
-│                                              │            │
-│                                              ▼            │
-│                                      GitHub REST API      │
-└──────────────────────────┬───────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                          Browser                                │
+│  ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌────────────┐   │
+│  │ 📅 日程  │  │ 📁 文档  │  │ 📂 代码    │  │ 📋 文档    │   │
+│  │ page.html│  │ page.html│  │ page.html  │  │ page.html  │   │
+│  └────┬─────┘  └────┬─────┘  └─────┬──────┘  └─────┬──────┘   │
+│       │             │              │               │           │
+│       ▼             ▼              ▼               ▼           │
+│  /api/calendar /api/file-    /api/repo-      /api/doc-summary   │
+│                 browser      browser          │                 │
+│                                               ▼                │
+│                                          DeepSeek API           │
+│                                        (deepseek-flash-v4)     │
+│                                   增量文档生成引擎              │
+└──────────────────────────┬────────────────────────────────────┘
                            │
                            ▼
                     ┌──────────────┐
                     │    core/     │
                     │              │
                     │  notify.js   │── node-notifier → Windows 弹窗
-                    │  storage.js  │── data/schedules.json
+                    │  storage.js  │── data/*.json
                     │  router.js   │── 模块自动发现
                     │  server.js   │── Express 服务 + /api/shutdown
                     │  web-ui.js   │── 主页面框架 (Pico CSS)
@@ -108,12 +120,21 @@ worktable/
 │   │   ├── api.js            后端 API (文件列表/打开/定位)
 │   │   └── page.html         前端页面
 │   │
-│   └── repo-browser/         代码管理
-│       ├── api.js            GitHub API 封装 (tree/content/commits/compare)
-│       └── page.html         前端页面 (双栏布局)
+│   ├── repo-browser/         代码管理
+│   │   ├── api.js            GitHub API 封装 (tree/content/commits/compare)
+│   │   └── page.html         前端页面 (双栏布局)
+│   │
+│   └── doc-summary/          概括性文档（✨ 新增）
+│       ├── api.js            后端 API (文档 CRUD + 增量生成引擎)
+│       ├── deepseek.js       DeepSeek API 客户端 (零依赖 https)
+│       └── page.html         前端页面 (文档列表 + 预览 + 生成流程)
 │
 ├── data/                     运行时数据
-│   └── schedules.json        日程持久化
+│   ├── schedules.json        日程持久化
+│   └── docs.json             概括性文档元数据索引
+│
+├── docs/                     文档 .md 文件存储
+│   └── doc-1.md, ...         各版本文档内容
 │
 └── node_modules/             npm 依赖
 ```
@@ -158,7 +179,8 @@ module.exports = { register, label };
 {
   "port": 8180,
   "docRoot": ".",
-  "githubToken": ""
+  "githubToken": "",
+  "deepseekKey": ""
 }
 ```
 
@@ -167,6 +189,7 @@ module.exports = { register, label };
 | `port` | HTTP 服务端口 | `8180` |
 | `docRoot` | 文档管理读取的根目录 | `.`（项目目录） |
 | `githubToken` | GitHub 个人访问令牌（提 API 限流到 5000次/小时） | `""`（匿名限流 60次/小时） |
+| `deepseekKey` | DeepSeek API Key（用于增量文档生成） | `""`
 
 > ⚠️ `config.json` 已在 `.gitignore` 中，不会提交到 Git，防止 Token 泄露。
 
@@ -180,6 +203,7 @@ module.exports = { register, label };
 | Web 框架 | Express |
 | 系统通知 | node-notifier |
 | GitHub API | Node.js 内置 https 模块（零额外依赖） |
+| DeepSeek API | Node.js 内置 https 模块（零额外依赖） |
 | 前端样式 | Pico CSS（CDN 零构建） |
 | 前端逻辑 | 原生 JavaScript |
 | 数据存储 | JSON 文件 |
@@ -188,9 +212,8 @@ module.exports = { register, label };
 
 ## 未来规划
 
-- **repo-analyzer** — 读取本地 Git 仓库代码，基于用户手写的模板文档生成/更新概括性 Word 文档
-- **github-watcher** — 监控 GitHub PR 合入，分析 diff，增量更新概括文档并归档旧版
-- 更多工具模块持续加入…
+- **github-watcher** — 监控 GitHub PR 合入，自动触发文档增量更新并归档旧版
+- 📋 更多工具模块持续加入…
 
 ---
 

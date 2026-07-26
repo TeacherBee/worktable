@@ -57,8 +57,8 @@ function renderMainPage(navItems) {
       color: var(--pico-primary);
     }
     .sidebar .nav-link.active {
-      background: var(--pico-primary-background, #e9ecef);
-      color: var(--pico-primary);
+      background: var(--pico-primary);
+      color: #fff;
       font-weight: 500;
     }
     .sidebar .spacer {
