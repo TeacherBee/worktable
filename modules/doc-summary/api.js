@@ -3,6 +3,11 @@ const { readJSON, writeJSON } = require('../../core/storage');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const {
+  Document, Packer, Paragraph, TextRun, HeadingLevel,
+  AlignmentType, TabStopPosition, TabStopType, convertInchesToTwip,
+  UnderlineType, Table, TableRow, TableCell, WidthType, BorderStyle,
+} = require('docx');
 
 const label = '📋 仓库文档';
 
@@ -219,6 +224,313 @@ worktable/
 注意：直接输出完整的 Markdown 文档，不要添加任何额外说明。`;
 
 // ══════════════════════════════════════════════════
+//  Markdown → DOCX 转换
+// ══════════════════════════════════════════════════
+
+/**
+ * 将 Markdown 文本转换为 Word (DOCX) 文档 Buffer。
+ * @param {string} markdown - Markdown 原文
+ * @param {string} title - 文档标题（用作文件属性）
+ * @returns {Promise<Buffer>} DOCX 文件 Buffer
+ */
+async function mdToDocx(markdown, title) {
+  const children = [];
+  const lines = markdown.split('\n');
+  let i = 0;
+
+  // 标题自动编号计数器
+  const hCount = [0, 0, 0, 0, 0, 0];
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // ── 空行 ──
+    if (/^\s*$/.test(line)) { i++; continue; }
+
+    // ── 代码块（```，允许行首空格缩进） ──
+    if (/^[ \t]*```/.test(line)) {
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !/^[ \t]*```/.test(lines[i])) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // 跳过关闭的 ```
+      if (codeLines.length) {
+        codeLines.forEach((cl) => {
+          children.push(
+            new Paragraph({
+              spacing: { before: 0, after: 0, line: 276 },
+              indent: { left: convertInchesToTwip(0.3) },
+              shading: { type: 'clear', fill: 'F5F5F5' },
+              children: [
+                new TextRun({ text: cl, font: 'Consolas', size: 18, color: '333333' }),
+              ],
+            })
+          );
+        });
+        children.push(new Paragraph({ spacing: { before: 0, after: 60 } }));
+      }
+      continue;
+    }
+
+    // ── 标题（带自动编号） ──
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      let text = headingMatch[2];
+
+      // 更新编号计数器
+      hCount[level - 1]++;
+      for (let j = level; j < 6; j++) hCount[j] = 0;
+
+      // 生成编号前缀
+      const prefix = hCount.slice(0, level).join('.');
+
+      // 去除标题中已有的前置序号（如 "1. 核心功能" → 不重复加）
+      text = text.replace(/^\d+(\.\d+)*\s*[.．、]\s*/, '');
+
+      // 加入编号前缀
+      text = prefix + ' ' + text;
+
+      const formatted = text.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+      const headingLevelMap = {
+        1: HeadingLevel.HEADING_1,
+        2: HeadingLevel.HEADING_2,
+        3: HeadingLevel.HEADING_3,
+        4: HeadingLevel.HEADING_4,
+        5: HeadingLevel.HEADING_5,
+        6: HeadingLevel.HEADING_6,
+      };
+      children.push(
+        new Paragraph({
+          heading: headingLevelMap[level] || HeadingLevel.HEADING_1,
+          spacing: { before: level === 1 ? 360 : 240, after: 120 },
+          children: parseTextRuns(formatted),
+        })
+      );
+      i++;
+      continue;
+    }
+
+    // ── 表格 ──
+    if (/^\|.+\|/.test(line.trim())) {
+      const tableLines = [];
+      // 收集所有连续的表行
+      while (i < lines.length && /^\|.*\|/.test(lines[i].trim())) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      if (tableLines.length >= 2) {
+        // 判断第二行是否为分隔行（---|---|---）
+        const sepRow = tableLines[1];
+        const isSeparator = /^\|[\s\-:]+\|/.test(sepRow);
+        const headerRow = isSeparator ? tableLines[0] : null;
+        const dataRows = isSeparator ? tableLines.slice(2) : tableLines;
+
+        // 解析表头（找到分隔行也算出了列数）
+        const colCount = headerRow
+          ? headerRow.split('|').filter(s => s.trim()).length
+          : dataRows[0].split('|').filter(s => s.trim()).length;
+
+        if (colCount > 0) {
+          const rows = [];
+
+          // 表头行（如果有）
+          if (headerRow) {
+            const cells = parseTableRow(headerRow);
+            rows.push(
+              new TableRow({
+                tableHeader: true,
+                children: cells.map((cellText) => {
+                  const formatted = cellText.trim()
+                    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+                  return new TableCell({
+                    width: { size: 100 / colCount, type: WidthType.PERCENTAGE },
+                    shading: { type: 'clear', fill: 'E8E8E8' },
+                    children: [
+                      new Paragraph({
+                        spacing: { before: 40, after: 40 },
+                        children: parseTextRuns(formatted),
+                      }),
+                    ],
+                  });
+                }),
+              })
+            );
+          }
+
+          // 数据行
+          dataRows.forEach((dr) => {
+            const cells = parseTableRow(dr);
+            rows.push(
+              new TableRow({
+                children: cells.map((cellText) => {
+                  const formatted = cellText.trim()
+                    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+                  return new TableCell({
+                    width: { size: 100 / colCount, type: WidthType.PERCENTAGE },
+                    children: [
+                      new Paragraph({
+                        spacing: { before: 30, after: 30 },
+                        children: parseTextRuns(formatted),
+                      }),
+                    ],
+                  });
+                }),
+              })
+            );
+          });
+
+          children.push(
+            new Table({
+              rows,
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              borders: {
+                insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' },
+                insideVertical: { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' },
+                top: { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' },
+                bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' },
+                left: { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' },
+                right: { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' },
+              },
+            })
+          );
+          children.push(new Paragraph({ spacing: { before: 0, after: 120 } }));
+        }
+      } else if (tableLines.length === 1) {
+        // 只有一行 |...|，当作普通段落处理
+        const text = tableLines[0].replace(/\|/g, '').trim()
+          .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+        children.push(new Paragraph({ spacing: { before: 60, after: 60, line: 360 }, children: parseTextRuns(text) }));
+      }
+      continue;
+    }
+
+    // ── 无序列表 ──
+    if (/^[-*+]\s+(.+)/.test(line)) {
+      const items = [];
+      const listRe = /^[-*+]\s+(.+)/;
+      while (i < lines.length && listRe.test(lines[i])) { items.push(lines[i].match(listRe)[1]); i++; }
+      items.forEach((itemText) => {
+        const formatted = itemText.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+        children.push(
+          new Paragraph({
+            spacing: { before: 40, after: 40 },
+            indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.25) },
+            bullet: { level: 0 },
+            children: parseTextRuns(formatted),
+          })
+        );
+      });
+      continue;
+    }
+
+    // ── 有序列表（序号嵌入文本，使用原文序号） ──
+    if (/^\d+\.\s+(.+)/.test(line)) {
+      const items = [];
+      const olRe = /^(\d+)\.\s+(.+)/;
+      while (i < lines.length && olRe.test(lines[i])) {
+        const m = lines[i].match(olRe);
+        items.push({ num: m[1], text: m[2] });
+        i++;
+      }
+      items.forEach((item) => {
+        const formatted = item.text.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+        children.push(
+          new Paragraph({
+            spacing: { before: 40, after: 40 },
+            indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.25) },
+            children: [
+              new TextRun({ text: item.num + '. ', bold: true, size: 24 }),
+              ...parseTextRuns(formatted),
+            ],
+          })
+        );
+      });
+      continue;
+    }
+
+    // ── 普通段落（收集连续的非空非特殊行） ──
+    const paraLines = [];
+    while (i < lines.length
+      && !/^\s*$/.test(lines[i])
+      && !/^[ \t]*```/.test(lines[i])
+      && !/^#{1,6}\s+/.test(lines[i])
+      && !/^[-*+]\s+/.test(lines[i])
+      && !/^\d+\.\s+/.test(lines[i])
+      && !/^\|.*\|/.test(lines[i].trim())) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    if (paraLines.length) {
+      const paraText = paraLines.join(' ').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+      children.push(
+        new Paragraph({
+          spacing: { before: 60, after: 60, line: 360 },
+          children: parseTextRuns(paraText),
+        })
+      );
+    }
+  }
+
+  const doc = new Document({
+    title: title || '文档',
+    description: '由 Worktable 导出',
+    creator: 'Worktable',
+    styles: {
+      default: {
+        document: {
+          run: { size: 24, font: 'Microsoft YaHei' },
+          paragraph: { spacing: { line: 360 } },
+        },
+      },
+    },
+    sections: [{ children }],
+  });
+
+  return await Packer.toBuffer(doc);
+}
+
+/**
+ * 解析 Markdown 表格行 | a | b | c | → [' a ', ' b ', ' c ']
+ */
+function parseTableRow(row) {
+  return row.split('|').slice(1, -1);
+}
+
+/**
+ * 解析段落中的内联格式（粗体/斜体），返回 TextRun 数组。
+ * 使用 <b>...</b> 和 <i>...</i> 标记作为中间格式。
+ * @param {string} text
+ * @returns {TextRun[]}
+ */
+function parseTextRuns(text) {
+  const runs = [];
+  const re = /(<\/?[bi]>)/;
+  const parts = text.split(re);
+  let currentFormatting = 'normal';
+
+  for (const part of parts) {
+    if (part === '<b>') { currentFormatting = 'bold'; continue; }
+    if (part === '</b>') { currentFormatting = 'normal'; continue; }
+    if (part === '<i>') { currentFormatting = 'italic'; continue; }
+    if (part === '</i>') { currentFormatting = 'normal'; continue; }
+    if (!part) continue;
+
+    const opts = { text: part, size: 24 };
+    if (currentFormatting === 'bold') {
+      opts.bold = true;
+    } else if (currentFormatting === 'italic') {
+      opts.italics = true;
+    }
+    runs.push(new TextRun(opts));
+  }
+
+  return runs.length ? runs : [new TextRun({ text: text || '', size: 24 })];
+}
+
+// ══════════════════════════════════════════════════
 //  路由注册
 // ══════════════════════════════════════════════════
 
@@ -245,7 +557,30 @@ function register(app, basePath) {
     res.json({ ...doc, content });
   });
 
-  // ─── 3. 上传文档 ───
+  // ─── 3. 导出 Word 文档 ───
+
+  app.get(`${basePath}/docs/:id/export`, async (req, res) => {
+    try {
+      const meta = readMeta();
+      const doc = meta.docs.find((d) => d.id === req.params.id);
+      if (!doc) return res.status(404).json({ error: '文档未找到' });
+      const filePath = path.join(DOCS_DIR, doc.fileName);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ error: '文档文件已丢失' });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const buffer = await mdToDocx(content, doc.title);
+
+      const safeName = (doc.title || '文档').replace(/[<>:"/\\|?*]/g, '_');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}.docx`);
+      res.send(buffer);
+    } catch (err) {
+      console.error('[doc-summary] Export error:', err);
+      res.status(500).json({ error: '导出失败: ' + err.message });
+    }
+  });
+
+  // ─── 4. 上传文档 ───
 
   app.post(`${basePath}/upload`, (req, res) => {
     const { title, commitSha, content } = req.body;
@@ -263,7 +598,7 @@ function register(app, basePath) {
     res.status(201).json(entry);
   });
 
-  // ─── 4. 删除文档 ───
+  // ─── 5. 删除文档 ───
 
   app.delete(`${basePath}/docs/:id`, (req, res) => {
     const meta = readMeta();
@@ -277,7 +612,7 @@ function register(app, basePath) {
     res.json({ success: true });
   });
 
-  // ─── 5. 分析变更（Phase 1） ───
+  // ─── 6. 分析变更（Phase 1） ───
 
   app.post(`${basePath}/analyze`, async (req, res) => {
     const { baseDocId, targetCommitSha, owner, repo } = req.body;
@@ -324,7 +659,7 @@ function register(app, basePath) {
     }
   });
 
-  // ─── 6. 生成大纲（Phase 2） ───
+  // ─── 7. 生成大纲（Phase 2） ───
 
   app.post(`${basePath}/outline`, async (req, res) => {
     const { baseDocId, changePoints } = req.body;
@@ -353,7 +688,7 @@ function register(app, basePath) {
     }
   });
 
-  // ─── 7. 生成完整文档（Phase 3） ───
+  // ─── 8. 生成完整文档（Phase 3） ───
 
   app.post(`${basePath}/generate`, async (req, res) => {
     const { baseDocId, outline, changePoints } = req.body;
@@ -385,7 +720,7 @@ function register(app, basePath) {
     }
   });
 
-  // ─── 8. 保存生成结果 ───
+  // ─── 9. 保存生成结果 ───
 
   app.post(`${basePath}/save`, (req, res) => {
     const { content, title, commitSha, source } = req.body;

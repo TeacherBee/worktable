@@ -271,7 +271,10 @@ function loadDocContent(id) {
       area.innerHTML =
         `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;flex-wrap:wrap;gap:.5rem;">
           <div><strong>${escapeHtml(data.title)}</strong><span style="font-size:.85rem;color:var(--pico-muted-color);margin-left:.75rem;">v${data.version} · ${date} · ${data.shortSha ? '<code>'+data.shortSha+'</code> · ' : ''}${sLabel}</span></div>
-          <button class="outline secondary" style="font-size:.85rem;padding:.25rem .75rem;" onclick="deleteDoc('${data.id}')">🗑 删除</button>
+          <div style="display:flex;gap:.4rem;">
+            <a href="/api/doc-summary/docs/${data.id}/export" role="button" class="outline secondary" style="font-size:.85rem;padding:.25rem .75rem;text-decoration:none;" download>📥 Word</a>
+            <button class="outline secondary" style="font-size:.85rem;padding:.25rem .75rem;" onclick="deleteDoc('${data.id}')">🗑 删除</button>
+          </div>
         </div>
         <div class="doc-view">${renderMarkdown(data.content || '')}</div>`;
     })
