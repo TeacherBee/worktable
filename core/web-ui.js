@@ -1,12 +1,22 @@
 /**
  * Render the main application HTML page.
  * @param {Array} navItems - [{ name, label }] from module discovery
+ * @param {string|null} [activeModuleName] - currently active module name for nav highlighting
+ * @param {string|null} [moduleContent] - pre-rendered module HTML + inline scripts
  * @returns {string} HTML content
  */
-function renderMainPage(navItems) {
+function renderMainPage(navItems, activeModuleName, moduleContent) {
   const navLinks = navItems
-    .map((item) => `      <a href="/app/${item.name}" class="nav-link" data-module="${item.name}">${item.label}</a>`)
+    .map((item) => {
+      const active = item.name === activeModuleName ? ' active' : '';
+      return `      <a href="/app/${item.name}" class="nav-link${active}" data-module="${item.name}">${item.label}</a>`;
+    })
     .join('\n');
+
+  const mainContent = moduleContent || `    <article>
+      <header><h2>👋 欢迎使用 Worktable</h2></header>
+      <p>请从左侧导航栏选择一个功能开始使用。</p>
+    </article>`;
 
   return `<!DOCTYPE html>
 <html lang="zh-CN" data-theme="light">
@@ -90,14 +100,6 @@ function renderMainPage(navItems) {
       overflow-y: auto;
       min-height: 100vh;
     }
-    /* ── 模块页面加载动画 ── */
-    .module-loading {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 200px;
-      color: var(--pico-muted-color);
-    }
     /* ── 深色模式 ── */
     @media (prefers-color-scheme: dark) {
       .sidebar {
@@ -118,17 +120,14 @@ ${navLinks}
 
   <!-- 右侧内容区 -->
   <main class="main-content" id="contentArea">
-    <article>
-      <header><h2>👋 欢迎使用 Worktable</h2></header>
-      <p>请从左侧导航栏选择一个功能开始使用。</p>
-    </article>
+${mainContent}
   </main>
 
   <script>
     // ── 日期显示 ──
     function updateDate() {
-      const now = new Date();
-      const opts = { year: 'numeric', month: 'numeric', day: 'numeric' };
+      var now = new Date();
+      var opts = { year: 'numeric', month: 'numeric', day: 'numeric' };
       document.getElementById('dateDisplay').textContent = now.toLocaleDateString('zh-CN', opts);
     }
     updateDate();
@@ -145,52 +144,11 @@ ${navLinks}
             + '</article>';
         })
         .catch(function() {
-          // 服务关闭后 fetch 会断开，也算成功
           document.body.innerHTML = '<article style="max-width:400px;margin:4rem auto;text-align:center;">'
             + '<h2>⏻ 服务已关闭</h2>'
             + '<p>你可以关闭此标签页了。</p>'
             + '</article>';
         });
-    });
-
-    // ── 导航点击：加载模块页面 ──
-    document.querySelectorAll('.nav-link').forEach(function(link) {
-      link.addEventListener('click', function(e) {
-        e.preventDefault();
-        // 高亮当前
-        document.querySelectorAll('.nav-link').forEach(function(l) { l.classList.remove('active'); });
-        link.classList.add('active');
-
-        var url = link.getAttribute('href');
-        var contentArea = document.getElementById('contentArea');
-
-        // 显示加载中
-        contentArea.innerHTML = '<div class="module-loading">加载中…</div>';
-
-        // 用 fetch 获取模块 page.html 并注入
-        fetch(url)
-          .then(function(res) {
-            if (!res.ok) throw new Error('页面加载失败');
-            return res.text();
-          })
-          .then(function(html) {
-            contentArea.innerHTML = html;
-            // 执行 page.html 中的脚本
-            var scripts = contentArea.querySelectorAll('script');
-            scripts.forEach(function(oldScript) {
-              var newScript = document.createElement('script');
-              if (oldScript.src) {
-                newScript.src = oldScript.src;
-              } else {
-                newScript.textContent = oldScript.textContent;
-              }
-              oldScript.parentNode.replaceChild(newScript, oldScript);
-            });
-          })
-          .catch(function(err) {
-            contentArea.innerHTML = '<article><header>⚠️ 错误</header><p>' + err.message + '</p></article>';
-          });
-      });
     });
   </script>
 </body>

@@ -29,14 +29,29 @@ function createServer(config) {
     res.send(renderMainPage(navItems));
   });
 
-  // ── 模块前端页面 ──
+  // ── 模块前端页面（整页加载，含侧边栏） ──
   app.get('/app/:moduleName', (req, res) => {
     const safeName = path.basename(req.params.moduleName);
     const pagePath = path.join(__dirname, '..', 'modules', safeName, 'page.html');
     if (fs.existsSync(pagePath)) {
-      res.sendFile(pagePath);
+      const fullHtml = fs.readFileSync(pagePath, 'utf-8');
+      // 判断格式：有 <body> 标签的完整 HTML，还是纯内容片段
+      const bodyMatch = fullHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      let moduleContent;
+      if (bodyMatch) {
+        // 完整 HTML 格式：提取 head 中的 <style> + <body> 内内容
+        const styleTags = [];
+        const styleRe = /<style[^>]*>[\s\S]*?<\/style>/gi;
+        let m;
+        while ((m = styleRe.exec(fullHtml)) !== null) styleTags.push(m[0]);
+        moduleContent = styleTags.join('\n') + '\n' + bodyMatch[1].trim();
+      } else {
+        // 片段格式：直接作为内容（无 html/head/body 包裹）
+        moduleContent = fullHtml;
+      }
+      res.send(renderMainPage(navItems, safeName, moduleContent));
     } else {
-      res.status(404).json({ error: 'Module page not found' });
+      res.redirect('/');
     }
   });
 
